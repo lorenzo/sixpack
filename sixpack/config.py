@@ -28,4 +28,8 @@ else:
         'ignored_ip_addresses':os.environ.get('SIXPACK_CONFIG_IGNORE_IPS', "").split(","),
         'asset_path':os.environ.get('SIXPACK_CONFIG_ASSET_PATH', "gen"),
         'secret_key':os.environ.get('SIXPACK_CONFIG_SECRET', 'temp'),
+        'queue': {
+            'url': os.environ.get('SIXPACK_CONFIG_RABBIT_URL', None),
+            'exchange': os.environ.get('SIXPACK_CONFIG_RABBIT_EXCHANGE', None)
+        }
     }

@@ -13,7 +13,6 @@ VALID_KPI_RE = re.compile(r"^[a-z0-9][a-z0-9\-_]*$", re.I)
 VALID_EXPERIMENT_OPTS = ('traffic_fraction',)
 RANDOM_SAMPLE = .2
 
-
 class Client(object):
 
     def __init__(self, client_id, redis_conn):
@@ -23,7 +22,7 @@ class Client(object):
 
 class Experiment(object):
 
-    def __init__(self, name, alternatives, redis_conn):
+    def __init__(self, name, alternatives, redis_conn, queue = None):
         if len(alternatives) < 2:
             raise ValueError('experiments require at least two alternatives')
 
@@ -37,6 +36,7 @@ class Experiment(object):
         self._winner = False
         self._traffic_fraction = False
         self._sequential_ids = dict()
+        self.queue = queue
 
     def __repr__(self):
         return '<Experiment: {0})>'.format(self.name)
@@ -230,6 +230,11 @@ class Experiment(object):
 
         if not self.existing_conversion(client):
             alternative.record_conversion(client, dt=dt)
+            if self.queue:
+                self.queue.notify_conversion(
+                        alternative.experiment.name,
+                        kpi,
+                        client.client_id)
 
         return alternative.name
 
@@ -301,6 +306,10 @@ class Experiment(object):
             chosen_alternative, participate = self.choose_alternative(client=client)
             if participate:
                 chosen_alternative.record_participation(client, dt=dt)
+                if self.queue:
+                    self.queue.notify_participation(self.name,
+                            chosen_alternative.name,
+                            client.client_id)
 
         return chosen_alternative
 
@@ -379,25 +388,26 @@ class Experiment(object):
             return _key("e:{0}".format(self.name))
 
     @classmethod
-    def find(cls, experiment_name, redis_conn):
+    def find(cls, experiment_name, redis_conn, queue = None):
         if not redis_conn.sismember(_key("e"), experiment_name):
             raise ValueError('experiment does not exist')
 
         return cls(experiment_name,
                    Experiment.load_alternatives(experiment_name, redis_conn),
-                   redis_conn)
+                   redis_conn,
+                   queue)
 
     @classmethod
-    def find_or_create(cls, experiment_name, alternatives, redis_conn, opts={}):
+    def find_or_create(cls, experiment_name, alternatives, redis_conn, opts={}, queue=None):
         if len(alternatives) < 2:
             raise ValueError('experiments require at least two alternatives')
 
         Experiment.validate_options(opts)
 
         try:
-            experiment = Experiment.find(experiment_name, redis_conn)
+            experiment = Experiment.find(experiment_name, redis_conn, queue)
         except ValueError:
-            experiment = cls(experiment_name, alternatives, redis_conn)
+            experiment = cls(experiment_name, alternatives, redis_conn, queue)
             # TODO: I want to revist this later
             if 'traffic_fraction' in opts:
                 experiment.set_traffic_fraction(opts['traffic_fraction'])

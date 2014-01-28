@@ -40,6 +40,10 @@ Next, create a Sixpack configuration. A configuration must be created for sixpac
 
     asset_path: gen                         # Path for compressed assets to live. This path is RELATIVE to sixpack/static
     secret_key: '<your secret key here>'    # Random key (any string is valid, required for sixpack-web to run)
+    queue:                                  # Namespace key for settings regarding RabbitMQ. This section is optional and can be removed if not needed
+        url: <connection string>            # Queue connection string, for example: amqp://guest:guest@rabbit-server1:5672/%2F?backpressure_detection=t
+        exchange <name>                     # The exchange name to publish messages to
+
 
 You can store this file anywhere (we recommend ``/etc/sixpack/config.yml``). As long as Redis is running, you can now start the sixpack server like this::
 
@@ -60,6 +64,8 @@ Alternatively, as of version 1.1, all Sixpack configuration can be set by enviro
 * ``SIXPACK_CONFIG_IGNORE_IPS`` - comma separated
 * ``SIXPACK_CONFIG_ASSET_PATH``
 * ``SIXPACK_CONFIG_SECRET``
+* ``SIXPACK_CONFIG_RABBIT_URL``
+* ``SIXPACK_CONFIG_RABBIT_EXCHANGE``
 
 Using the API
 =============

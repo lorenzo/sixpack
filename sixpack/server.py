@@ -18,13 +18,21 @@ except ConnectionError:
     print "Redis is currently unavailable or misconfigured"
     sys.exit()
 
+from queue import Queue
+queue = None
+try:
+    if 'queue' in cfg and cfg['queue']['url'] is not None and cfg['queue']['exchange'] is not None:
+        queue = Queue(cfg['queue']['url'], cfg['queue']['exchange'])
+except:
+    print "Could not connect to rabbitmq, check the connection string"
+    sys.exit()
+
 from models import Experiment, Client
 from utils import service_unavailable_on_connection_error, json_error, json_success
 
-
 class Sixpack(object):
 
-    def __init__(self, redis_conn):
+    def __init__(self, redis_conn, queue = None):
         self.redis = redis_conn
 
         self.config = cfg
@@ -36,6 +44,8 @@ class Sixpack(object):
             Rule('/convert', endpoint='convert'),
             Rule('/favicon.ico', endpoint='favicon')
         ])
+
+        self.queue = queue
 
     def __call__(self, environ, start_response):
         return self.wsgi_app(environ, start_response)
@@ -94,7 +104,7 @@ class Sixpack(object):
         client = Client(client_id, self.redis)
 
         try:
-            experiment = Experiment.find(experiment_name, self.redis)
+            experiment = Experiment.find(experiment_name, self.redis, self.queue)
             if cfg.get('enabled', True):
                 dt = None
                 if request.args.get("datetime"):
@@ -136,7 +146,7 @@ class Sixpack(object):
         opts['traffic_fraction'] = traffic_fraction
 
         try:
-            experiment = Experiment.find_or_create(experiment_name, alts, self.redis, opts)
+            experiment = Experiment.find_or_create(experiment_name, alts, self.redis, opts, self.queue)
         except ValueError as e:
             return json_error({'message': str(e)}, request, 400)
 
@@ -193,14 +203,13 @@ def is_ignored_ip(ip_address):
 
     return unquote(ip_address) in cfg.get('ignored_ip_addresses')
 
-
 # Method to run with built-in server
 def create_app():
-    app = Sixpack(db.REDIS)
+    app = Sixpack(db.REDIS, queue)
     return app
 
 
 # Method to run with gunicorn
 def start(environ, start_response):
-    app = Sixpack(db.REDIS)
+    app = Sixpack(db.REDIS, queue)
     return app(environ, start_response)
