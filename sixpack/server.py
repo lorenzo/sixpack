@@ -20,12 +20,8 @@ except ConnectionError:
 
 from queue import Queue
 queue = None
-try:
-    if 'queue' in cfg and cfg['queue']['url'] is not None and cfg['queue']['exchange'] is not None:
-        queue = Queue(cfg['queue']['url'], cfg['queue']['exchange'])
-except:
-    print "Could not connect to rabbitmq, check the connection string"
-    sys.exit()
+if 'queue' in cfg and cfg['queue']['url'] is not None and cfg['queue']['exchange'] is not None:
+    queue = Queue(cfg['queue']['url'], cfg['queue']['exchange'])
 
 from models import Experiment, Client
 from utils import service_unavailable_on_connection_error, json_error, json_success

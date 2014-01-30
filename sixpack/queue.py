@@ -1,5 +1,5 @@
-import pika
-import json
+from kombu import Connection, Exchange
+from kombu.pools import producers
 
 class Queue(object):
 
@@ -7,31 +7,28 @@ class Queue(object):
         """ Initializes a blocking connection to RabbitMQ out of a connection
             URL and an exchange name
         """
-        parameters = pika.URLParameters(url)
-        connection = pika.BlockingConnection(parameters)
-        self.channel = connection.channel()
-        self.exchange = exchange
+        self.connection = Connection(url)
+        self.exchange = Exchange(exchange)
 
     def notify_participation(self, experiment, alternative, client_id):
         """ Publishes a json encoded message to the configured exchange and routing
             key=participate containing the passed paramenters
         """
-        self.channel.basic_publish(
-               exchange=self.exchange,
-               routing_key='participate',
-               body=json.dumps({
-                   'experiment': experiment,
-                   'alternative': alternative,
-                   'client_id': client_id}))
+        with producers[self.connection].acquire(block=True) as producer:
+            message = {'experiment': experiment,
+                       'alternative': alternative,
+                       'client_id': client_id}
+            producer.publish(message, exchange=self.exchange,
+                                    routing_key='participate')
 
     def notify_conversion(self, experiment, kpi, client_id):
         """ Publishes a json encoded message to the configured exchange and routing
             key=convert containing the passed parameters
         """
-        self.channel.basic_publish(
-               exchange=self.exchange,
-               routing_key='convert',
-               body=json.dumps({
+        with producers[self.connection].acquire(block=True) as producer:
+            message = {
                    'experiment': experiment,
                    'kpi': kpi,
-                   'client_id': client_id}))
+                   'client_id': client_id}
+            producer.publish(message, exchange=self.exchange,
+                                    routing_key='convert')
