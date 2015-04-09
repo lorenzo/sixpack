@@ -1,4 +1,5 @@
 from datetime import datetime
+from hashlib import sha1
 from math import log
 import operator
 import random
@@ -10,97 +11,79 @@ from db import _key, msetbit, sequential_id, first_key_with_bit_set
 # This is pretty restrictive, but we can always relax it later.
 VALID_EXPERIMENT_ALTERNATIVE_RE = re.compile(r"^[a-z0-9][a-z0-9\-_]*$", re.I)
 VALID_KPI_RE = re.compile(r"^[a-z0-9][a-z0-9\-_]*$", re.I)
-VALID_EXPERIMENT_OPTS = ('traffic_fraction',)
-RANDOM_SAMPLE = .2
 
 class Client(object):
 
-    def __init__(self, client_id, redis_conn):
-        self.redis = redis_conn
+    def __init__(self, client_id, redis=None):
+        self.redis = redis
         self.client_id = client_id
 
 
 class Experiment(object):
 
-    def __init__(self, name, alternatives, redis_conn, queue = None):
+    def __init__(self, name, alternatives,
+        winner=False,
+        traffic_fraction=False,
+        redis=None,
+        queue=None):
+
         if len(alternatives) < 2:
             raise ValueError('experiments require at least two alternatives')
 
         self.name = name
-        self.redis = redis_conn
-        self.random_sample = RANDOM_SAMPLE
+        self.redis = redis
         self.alternatives = self.initialize_alternatives(alternatives)
         self.kpi = None
 
         # False here is a sentinal value for "not looked up yet"
-        self._winner = False
-        self._traffic_fraction = False
+        self._winner = winner
+        self._traffic_fraction = traffic_fraction
         self._sequential_ids = dict()
         self.queue = queue
 
     def __repr__(self):
         return '<Experiment: {0})>'.format(self.name)
 
-    def objectify_by_period(self, period):
+    def objectify_by_period(self, period, slim=False):
         objectified = {
             'name': self.name,
             'period': period,
             'alternatives': [],
-            'created_at': self.created_at(),
+            'created_at': self.created_at,
+            'traffic_fraction': self.traffic_fraction,
             'total_participants': self.total_participants(),
             'total_conversions': self.total_conversions(),
-            'description': self.get_description(),
+            'description': self.description,
             'has_winner': self.winner is not None,
+            'winner': self.winner.name if self.winner is not None else '',
             'is_archived': self.is_archived(),
-            'kpis': list(self.get_kpis()),
+            'kpis': list(self.kpis),
             'kpi': self.kpi
         }
 
         for alternative in self.alternatives:
-            objectified_alt = alternative.objectify_by_period(period)
+            objectified_alt = alternative.objectify_by_period(period, slim)
             objectified['alternatives'].append(objectified_alt)
 
+        if slim:
+            for key in ['period', 'kpi', 'kpis', 'has_winner']:
+                del(objectified[key])
+
         return objectified
-
-    def csvify(self):
-        import cStringIO as StringIO
-        import csv
-        csvfile = StringIO.StringIO()
-        writer = csv.writer(csvfile)
-        writer.writerow(['Alternative Details'])
-        writer.writerow(['date', 'alternative', 'participants', 'conversions'])
-        obj = self.objectify_by_period('day')
-        for alt in obj['alternatives']:
-            for datum in alt['data']:
-                writer.writerow([datum['date'], alt['name'], datum['participants'], datum['conversions']])
-        writer.writerow([])
-
-        writer.writerow(['"{0}" Summary'.format(obj['name'])])
-        writer.writerow(['total participants', 'total_conversions', 'has_winner', 'description'])
-        writer.writerow([obj['total_participants'], obj['total_conversions'], obj['has_winner'], obj['description']])
-
-        writer.writerow([])
-        writer.writerow(['Alternative Summary'])
-
-        writer.writerow(['name', 'participant_count', 'completed_count'])
-        for alt in obj['alternatives']:
-            writer.writerow([alt['name'], alt['participant_count'], alt['completed_count']])
-
-        return csvfile.getvalue()
 
     def initialize_alternatives(self, alternatives):
         for alternative_name in alternatives:
             if not Alternative.is_valid(alternative_name):
                 raise ValueError('invalid alternative name')
 
-        return [Alternative(n, self, self.redis) for n in alternatives]
+        return [Alternative(n, self, redis=self.redis) for n in alternatives]
 
     def save(self):
         pipe = self.redis.pipeline()
         if self.is_new_record():
             pipe.sadd(_key('e'), self.name)
 
-        pipe.hset(self.key(), 'created_at', datetime.now())
+        pipe.hset(self.key(), 'created_at', datetime.now().strftime("%Y-%m-%d %H:%M"))
         pipe.hset(self.key(), 'traffic_fraction', self._traffic_fraction)
 
         # reverse here and use lpush to keep consistent with using lrange
@@ -113,8 +96,13 @@ class Experiment(object):
     def control(self):
         return self.alternatives[0]
 
+    @property
     def created_at(self):
-        return self.redis.hget(self.key(), 'created_at')
+        # Note: the split here is to correctly format legacy dates
+        try:
+            return self.redis.hget(self.key(), 'created_at').split('.')[0]
+        except (AttributeError) as e:
+            return None
 
     def get_alternative_names(self):
         return [alt.name for alt in self.alternatives]
@@ -161,7 +149,7 @@ class Experiment(object):
         if stat_range not in ['days', 'months', 'years']:
             raise ValueError("Unrecognized stat range: {0}".format(stat_range))
 
-        pipe = self.redis.pipe()
+        pipe = self.redis.pipeline()
 
         stats = {}
         search_key = _key("{0}:{1}:{2}".format(stat_type, exp_key, stat_range))
@@ -183,16 +171,23 @@ class Experiment(object):
         else:
             self.redis.hset(self.key(), 'description', description)
 
-    def get_description(self):
-        return self.redis.hget(self.key(), 'description')
+    @property
+    def description(self):
+        description = self.redis.hget(self.key(), 'description')
+        if description:
+            return description.decode("utf-8", "replace")
+        else:
+            return None
 
     def reset(self):
-        self.delete()
-
         name = self.name
+        desc = self.description
         alts = self.get_alternative_names()
 
-        experiment = Experiment(name, alts, self.redis)
+        self.delete()
+
+        experiment = Experiment(name, alts, redis=self.redis)
+        experiment.update_description(desc)
         experiment.save()
 
     def delete(self):
@@ -206,6 +201,11 @@ class Experiment(object):
         keys = self.redis.keys('*:{0}:*'.format(self.name))
         for key in keys:
             pipe.delete(key)
+
+        # Delete the KPIs as well
+        kpi_keys = self.redis.keys('*:{0}/*'.format(self.name))
+        for kpi_key in kpi_keys:
+            pipe.delete(kpi_key)
 
         pipe.execute()
 
@@ -236,7 +236,11 @@ class Experiment(object):
                         kpi,
                         client.client_id)
 
-        return alternative.name
+        return alternative
+
+    @property
+    def kpis(self):
+        return self.redis.smembers("{0}:kpis".format(self.key(include_kpi=False)))
 
     def set_kpi(self, kpi):
         self.kpi = None
@@ -251,14 +255,12 @@ class Experiment(object):
         self.redis.sadd("{0}:kpis".format(self.key(include_kpi=False)), kpi)
         self.kpi = kpi
 
-    def get_kpis(self):
-        return self.redis.smembers("{0}:kpis".format(self.key(include_kpi=False)))
-
     @property
     def winner(self):
-        if not self._winner:
+        if self._winner is False:
             self._winner = self.redis.get(self._winner_key)
-        return self._winner
+        if self._winner:
+            return Alternative(self._winner, self, redis=self.redis)
 
     def set_winner(self, alternative_name):
         if alternative_name not in self.get_alternative_names():
@@ -276,10 +278,10 @@ class Experiment(object):
 
     @property
     def traffic_fraction(self):
-        if not self._traffic_fraction:
+        if self._traffic_fraction is False:
             try:
                 self._traffic_fraction = float(self.redis.hget(self.key(), 'traffic_fraction'))
-            except TypeError:
+            except (TypeError, ValueError) as e:
                 self._traffic_fraction = 1
         return self._traffic_fraction
 
@@ -297,14 +299,19 @@ class Experiment(object):
             self._sequential_ids[client.client_id] = id_
         return self._sequential_ids[client.client_id]
 
-    def get_alternative(self, client, dt=None):
+    def get_alternative(self, client, dt=None, prefetch=False):
+        """Returns and records an alternative according to the following
+        precedence:
+          1. An existing alternative
+          2. A server-chosen alternative
+        """
         if self.is_archived():
             return self.control
 
         chosen_alternative = self.existing_alternative(client)
         if not chosen_alternative:
-            chosen_alternative, participate = self.choose_alternative(client=client)
-            if participate:
+            chosen_alternative, participate = self.choose_alternative(client)
+            if participate and not prefetch:
                 chosen_alternative.record_participation(client, dt=dt)
                 if self.queue:
                     self.queue.notify_participation(self.name,
@@ -330,7 +337,7 @@ class Experiment(object):
         altkey = first_key_with_bit_set(keys=keys, args=[self.sequential_id(client)])
         if altkey:
             idx = keys.index(altkey)
-            return Alternative(alts[idx], self, self.redis)
+            return Alternative(alts[idx], self, redis=self.redis)
 
         return None
 
@@ -340,30 +347,22 @@ class Experiment(object):
             self.exclude_client(client)
             return self.control, False
 
-        if cfg.get('enable_whiplash') and random.random() >= self.random_sample:
-            return Alternative(self._whiplash(), self, self.redis), True
+        return self._uniform_choice(client), True
 
-        return self._random_choice(), True
+    # Ported from https://github.com/facebook/planout/blob/master/planout/ops/random.py
+    def _uniform_choice(self, client):
+        idx = self._get_hash(client) % len(self.alternatives)
+        return self.alternatives[idx]
 
-    def _random_choice(self):
-        return random.choice(self.alternatives)
+    def _get_hash(self, client):
+        salty = "{0}.{1}".format(self.name, client.client_id)
 
-    def _whiplash(self):
-        stats = {}
-        for alternative in self.alternatives:
-            participant_count = alternative.participant_count()
-            completed_count = alternative.completed_count()
-            stats[alternative.name] = self._arm_guess(participant_count, completed_count)
-
-        return max(stats.iteritems(), key=operator.itemgetter(1))[0]
-
-    def _arm_guess(self, participant_count, completed_count):
-        fairness_score = 7
-
-        a = max([participant_count, 0])
-        b = max([participant_count - completed_count, 0])
-
-        return random.betavariate(a + fairness_score, b + fairness_score)
+        # We're going to take the first 7 bytes of the client UUID
+        # because of the largest integer values that can be represented safely
+        # with Sixpack client libraries
+        # More Info: https://github.com/seatgeek/sixpack/issues/132#issuecomment-54318218
+        hashed = sha1(salty).hexdigest()[:7]
+        return int(hashed, 16)
 
     def existing_conversion(self, client):
         alts = self.get_alternative_names()
@@ -371,7 +370,7 @@ class Experiment(object):
         altkey = first_key_with_bit_set(keys=keys, args=[self.sequential_id(client)])
         if altkey:
             idx = keys.index(altkey)
-            return Alternative(alts[idx], self, self.redis)
+            return Alternative(alts[idx], self, redis=self.redis)
 
         return None
 
@@ -388,33 +387,41 @@ class Experiment(object):
             return _key("e:{0}".format(self.name))
 
     @classmethod
-    def find(cls, experiment_name, redis_conn, queue = None):
-        if not redis_conn.sismember(_key("e"), experiment_name):
+    def find(cls, experiment_name,
+        redis=None,
+        queue = None):
+
+        if not redis.sismember(_key("e"), experiment_name):
             raise ValueError('experiment does not exist')
 
         return cls(experiment_name,
-                   Experiment.load_alternatives(experiment_name, redis_conn),
-                   redis_conn,
-                   queue)
+                   Experiment.load_alternatives(experiment_name, redis),
+                   redis=redis, queue=queue)
 
     @classmethod
-    def find_or_create(cls, experiment_name, alternatives, redis_conn, opts={}, queue=None):
+    def find_or_create(cls, experiment_name, alternatives,
+        traffic_fraction=None,
+        redis=None,
+        queue=None):
+
         if len(alternatives) < 2:
             raise ValueError('experiments require at least two alternatives')
 
-        Experiment.validate_options(opts)
+        if traffic_fraction is None:
+            traffic_fraction = 1
 
+        check_fraction = False
         try:
-            experiment = Experiment.find(experiment_name, redis_conn, queue)
+            experiment = Experiment.find(experiment_name, redis=redis, queue=queue)
+            check_fraction = True
         except ValueError:
-            experiment = cls(experiment_name, alternatives, redis_conn, queue)
+            experiment = cls(experiment_name, alternatives, redis=redis, queue=queue)
             # TODO: I want to revist this later
-            if 'traffic_fraction' in opts:
-                experiment.set_traffic_fraction(opts['traffic_fraction'])
-            else:
-                experiment.set_traffic_fraction(1)
-
+            experiment.set_traffic_fraction(traffic_fraction)
             experiment.save()
+
+        if check_fraction and experiment.traffic_fraction != traffic_fraction:
+            raise ValueError('do not change traffic fraction once a test has started. please delete in admin')
 
         # Make sure the alternative options are correct. If they are not,
         # raise an error.
@@ -424,41 +431,35 @@ class Experiment(object):
         return experiment
 
     @staticmethod
-    def all_names(redis_conn):
-        return redis_conn.smembers(_key('e'))
+    def all_names(redis=None):
+        return redis.smembers(_key('e'))
 
     @staticmethod
-    def all(redis_conn, exclude_archived=True):
+    def all(exclude_archived=True, redis=None):
         experiments = []
-        keys = redis_conn.smembers(_key('e'))
+        keys = redis.smembers(_key('e'))
 
         for key in keys:
-            experiment = Experiment.find(key, redis_conn)
+            experiment = Experiment.find(key, redis=redis)
             if experiment.is_archived() and exclude_archived:
                 continue
             experiments.append(experiment)
         return experiments
 
     @staticmethod
-    def archived(redis_conn):
-        experiments = Experiment.all(redis_conn, False)
+    def archived(redis=None):
+        experiments = Experiment.all(exclude_archived=False, redis=redis)
         return [exp for exp in experiments if exp.is_archived()]
 
     @staticmethod
-    def load_alternatives(experiment_name, redis_conn):
+    def load_alternatives(experiment_name, redis=None):
         key = _key("e:{0}:alternatives".format(experiment_name))
-        return redis_conn.lrange(key, 0, -1)
+        return redis.lrange(key, 0, -1)
 
     @staticmethod
     def is_valid(experiment_name):
         return (isinstance(experiment_name, basestring) and
                 VALID_EXPERIMENT_ALTERNATIVE_RE.match(experiment_name) is not None)
-
-    @staticmethod
-    def validate_options(opts):
-        for opt, val in opts.iteritems():
-            if opt not in VALID_EXPERIMENT_OPTS:
-                raise ValueError('invalid option')
 
     @staticmethod
     def validate_kpi(kpi):
@@ -468,15 +469,19 @@ class Experiment(object):
 
 class Alternative(object):
 
-    def __init__(self, name, experiment, redis_conn):
+    def __init__(self, name, experiment, redis=None):
         self.name = name
         self.experiment = experiment
-        self.redis = redis_conn
+        self.redis = redis
 
     def __repr__(self):
-        return "<Alternative {0} (Experiment {1})".format(self.name, self.experiment.name)
+        return "<Alternative {0} (Experiment {1})>".format(repr(self.name), repr(self.experiment.name))
 
-    def objectify_by_period(self, period):
+    def objectify_by_period(self, period, slim=False):
+
+        if slim:
+            return self.name
+
         PERIOD_TO_METHOD_MAP = {
             'day': {
                 'participants': self.participants_by_day,
@@ -527,7 +532,8 @@ class Alternative(object):
         return self.experiment.control.name == self.name
 
     def is_winner(self):
-        return self.experiment.winner == self.name
+        winner = self.experiment.winner
+        return winner and winner.name == self.name
 
     def participant_count(self):
         key = _key("p:{0}:{1}:all".format(self.experiment.name, self.name))

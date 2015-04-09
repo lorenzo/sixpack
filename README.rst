@@ -5,6 +5,9 @@ Sixpack
 .. image:: https://travis-ci.org/seatgeek/sixpack.png?branch=master
         :target: https://travis-ci.org/seatgeek/sixpack
 
+.. image:: https://coveralls.io/repos/seatgeek/sixpack/badge.png?branch=master
+  :target: https://coveralls.io/r/seatgeek/sixpack?branch=master
+
 Sixpack is a framework to enable A/B testing across multiple programming languages. It does this by exposing a simple API for client libraries.  Client libraries can be written in virtually any language.
 
 Sixpack has two main parts. The first, **Sixpack-server**, is responsible for responding to web requests.  The second, **Sixpack-web**, is a web dashboard for tracking and acting on your A/B tests.  Sixpack-web is optional.
@@ -32,8 +35,6 @@ Next, create a Sixpack configuration. A configuration must be created for sixpac
     redis_prefix: sixpack                   # all Redis keys will be prefixed with this
     redis_db: 15                            # DB number in redis
 
-    enable_whiplash: False                  # Enable the whiplash/multi-armed bandit alternative algorithm
-
     # The regex to match for robots
     robot_regex: $^|trivial|facebook|MetaURI|butterfly|google|amazon|goldfire|sleuth|xenu|msnbot|SiteUptime|Slurp|WordPress|ZIBB|ZyBorg|pingdom|bot|yahoo|slurp|java|fetch|spider|url|crawl|oneriot|abby|commentreader|twiceler
     ignored_ip_addresses: []                # List of IP
@@ -59,7 +60,6 @@ Alternatively, as of version 1.1, all Sixpack configuration can be set by enviro
 * ``SIXPACK_CONFIG_REDIS_PASSWORD``
 * ``SIXPACK_CONFIG_REDIS_PREFIX``
 * ``SIXPACK_CONFIG_REDIS_DB``
-* ``SIXPACK_CONFIG_WHIPLASH``
 * ``SIXPACK_CONFIG_ROBOT_REGEX``
 * ``SIXPACK_CONFIG_IGNORE_IPS`` - comma separated
 * ``SIXPACK_CONFIG_ASSET_PATH``
@@ -156,6 +156,7 @@ We've already provided clients in four languages. We'd love to add clients in ad
 - iOS_
 - Go_
 - Perl_
+- `C#`_
 
 .. _Ruby: http://github.com/seatgeek/sixpack-rb
 .. _Python: http://github.com/seatgeek/sixpack-py
@@ -164,16 +165,14 @@ We've already provided clients in four languages. We'd love to add clients in ad
 .. _iOS: http://github.com/seatgeek/sixpack-ios
 .. _Go: http://github.com/subosito/sixpack-go
 .. _Perl: http://github.com/b10m/p5-WWW-Sixpack
+.. _C#: https://github.com/nderraugh/sixpack-cs
 
-Algorithms
-==========
+Algorithm
+=========
 
-Sixpack ships with two algorithms for choosing an alternative.
+As of version 2.0 of Sixpack, we use a deterministic algorithm to choose which alternative a client with receive. The algorithm was ported from Facebook's Planout project, and more information can be found HERE_.
 
-The standard algorithm is purely random. It uses python's `random.choice()` against the list of available alternatives. Sixpack also includes a port of Andrew Nesbit's implementation_ of the multi-armed bandit algorithm_. This algorithm weighs the alternative based on relative performance. To enable the multi-armed bandit algorithm, please see the above configuration section.
 
-.. _implementation: https://github.com/andrew/split/blob/master/lib/split/algorithms/whiplash.rb
-.. _algorithm: http://stevehanov.ca/blog/index.php?id=132
 
 
 Dashboard
@@ -248,6 +247,10 @@ This command will make a few dozen requests to the ``participate`` and ``convert
 
 Please avoid changing versions numbers; we'll take care of that for you
 
+Using Sixpack in production?
+============
+If you're a company using Sixpack in production, kindly let us know! We're going to add a 'using Sixpack' section to the project landing page, and we'd like to include you. Drop Jack a line at jack [at] seatgeek dot.com with your company name.
+
 License
 ============
 
@@ -256,4 +259,5 @@ Sixpack is released under the `BSD 2-Clause License`_.
 
 .. _gunicorn: https://github.com/benoitc/gunicorn
 .. _CLIENTSPEC: https://github.com/seatgeek/sixpack/blob/master/CLIENTSPEC.md
+.. _HERE: https://github.com/facebook/planout/blob/master/python/planout/ops/random.py
 .. _`BSD 2-Clause License`: http://opensource.org/licenses/BSD-2-Clause

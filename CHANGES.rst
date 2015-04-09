@@ -1,3 +1,28 @@
+2.0.2
+=====
+* [BUG] Fix broken experiments when a winner is set
+
+2.0.1
+===
+* [FEATURE] New 'failing experiments' section in the dashboard
+* [ENHANCEMENT] Better error handling
+* [BUG] Remove infinite load for failing tests
+
+2.0
+===
+* [FEATURE] Include new deterministic alternative choice algorithm
+* [BUG] Several bug fixes
+* [REMOVE] Whiplash/Multi-armed bandit has been removed
+
+
+1.1.2
+=====
+* [ENHANCEMENT] Client can now choose alternative when async is not ideal
+
+1.1.1
+=====
+* [ENHANCEMENT] Redis Sentinal Support
+
 1.1.0
 =====
 * [ENHANCEMENT] Add this file

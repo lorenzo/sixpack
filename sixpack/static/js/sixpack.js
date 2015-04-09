@@ -79,7 +79,6 @@ $(function () {
 
     });
 
-
     // Focus the edit description textarea when opening the modal
     $('#desc-modal').on('shown', function() {
       $('#edit-description-textarea').focus();
@@ -114,6 +113,17 @@ $(function () {
           opacity: 1
         });
       });
+
+      // Listen to failed experiment response and handle it
+      el.on('fail', function(e, resp) {
+        if(experiment_name === 'undefined') {
+          $(this).html('<p> Experiment name is invalid. </p>');
+        } else {
+          $(this).remove();
+          $('.failing-experiments table').append('<tr><td><span>' + experiment_name + '</span></td>' + '<td><span>' + resp.statusText + '</span></td>' + '<td><span>' + "Erroring" + '</span></td></tr>');
+        }
+      });
+
       el.css('visibility', 'visible');
     }, {
       offset: viewport_height + (viewport_height * 0.5)
@@ -122,6 +132,7 @@ $(function () {
 });
 
 function getParameterByName (name) {
+  // return name;
   name = name.replace(/[\[]/, "\\\[").replace(/[\]]/, "\\\]");
   var regexS = "[\\?&]" + name + "=([^&#]*)";
   var regex = new RegExp(regexS);
