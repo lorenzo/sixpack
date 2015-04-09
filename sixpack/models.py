@@ -313,12 +313,15 @@ class Experiment(object):
             chosen_alternative, participate = self.choose_alternative(client)
             if participate and not prefetch:
                 chosen_alternative.record_participation(client, dt=dt)
-                if self.queue:
-                    self.queue.notify_participation(self.name,
-                            chosen_alternative.name,
-                            client.client_id)
+                notify_queue_participation(client, chosen_alternative)
 
         return chosen_alternative
+
+    def notify_queue_participation(client, chosen_alternative):
+        if self.queue:
+            self.queue.notify_participation(self.name,
+                    chosen_alternative.name,
+                    client.client_id)
 
     def exclude_client(self, client):
         key = _key("e:{0}:excluded".format(self.name))

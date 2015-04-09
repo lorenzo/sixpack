@@ -4,6 +4,7 @@ from config import CONFIG as cfg
 
 def participate(experiment, alternatives, client_id,
     force=None,
+    forced_participate=None,
     traffic_fraction=None,
     prefetch=False,
     datetime=None,
@@ -19,6 +20,11 @@ def participate(experiment, alternatives, client_id,
         alt = exp.control
     elif exp.winner is not None:
         alt = exp.winner
+    elif forced_participate and forced_participate in alternatives:
+        alt = Alternative(force, exp, redis=redis)
+        client = Client(client_id, redis=redis)
+        alt.record_participation(client, dt=datetime)
+        exp.notify_queue_participation(client, alt)
     else:
         client = Client(client_id, redis=redis)
         alt = exp.get_alternative(client, dt=datetime, prefetch=prefetch)
