@@ -21,7 +21,7 @@ def participate(experiment, alternatives, client_id,
     elif exp.winner is not None:
         alt = exp.winner
     elif forced_participate and forced_participate in alternatives:
-        alt = Alternative(force, exp, redis=redis)
+        alt = Alternative(forced_participate, exp, redis=redis)
         client = Client(client_id, redis=redis)
         alt.record_participation(client, dt=datetime)
         exp.notify_queue_participation(client, alt)

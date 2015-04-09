@@ -152,7 +152,7 @@ class Sixpack(object):
         else:
             try:
                 alt = participate(experiment_name, alts, client_id,
-                                  force=force, traffic_fraction=traffic_fraction, forced_participate=force_participate,
+                                  force=force, traffic_fraction=traffic_fraction, forced_participate=forced_participate,
                                   prefetch=prefetch, datetime=dt, redis=self.redis, queue=self.queue)
             except ValueError as e:
                 return json_error({'message': str(e)}, request, 400)
