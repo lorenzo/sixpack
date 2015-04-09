@@ -317,7 +317,7 @@ class Experiment(object):
 
         return chosen_alternative
 
-    def notify_queue_participation(client, chosen_alternative):
+    def notify_queue_participation(self, client, chosen_alternative):
         if self.queue:
             self.queue.notify_participation(self.name,
                     chosen_alternative.name,
